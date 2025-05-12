@@ -1,6 +1,9 @@
 import React, { useState } from "react";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
+import { ShiftProvider } from "./ShiftManager";
+import { ShiftDisplay } from "./ShiftDisplay";
+import { useShift } from "./ShiftManager";
 
 const shiftLabels = [
   "①朝番",
@@ -11,312 +14,336 @@ const shiftLabels = [
   "⑥夜支"
 ];
 
-// 印刷ボタンコンポーネント
-const PrintButton = () => (
-  <button className="print-btn" onClick={() => window.print()}>印刷</button>
-);
+// 仮の職員データ（後で職員管理機能を実装する際に置き換えます）
+const initialEmployees = [
+  { id: 1, name: "山田 太郎" },
+  { id: 2, name: "佐藤 花子" },
+  { id: 3, name: "鈴木 次郎" },
+];
 
-// シフト編集パネルコンポーネント
-const SidePanel = ({ date, shifts }) => {
-  const formatDate = (date) => date?.toISOString().split("T")[0];
-  if (!date) {
-    return (
-      <div className="side-panel">
-        <h3>シフト編集</h3>
-        <div style={{ color: '#888', marginTop: '16px' }}>日付を選択してください</div>
-      </div>
-    );
-  }
-  const dateStr = formatDate(date);
-  const dayShifts = shifts[dateStr] || {};
-  return (
-    <div className="side-panel">
-      <h3>{dateStr} のシフト編集</h3>
-      <ul>
-        {shiftLabels.map((label, idx) => (
-          <li key={idx}>{label}：{dayShifts[idx] || "(未設定)"}</li>
-        ))}
-      </ul>
-    </div>
-  );
-};
-
-// 職員別設定パネルコンポーネント
-const StaffSettingsPanel = () => {
-  // 仮の職員リスト
-  const staffList = [
-    { name: "山田 太郎", ngDays: "", maxDays: 20 },
-    { name: "佐藤 花子", ngDays: "", maxDays: 18 },
-    { name: "鈴木 次郎", ngDays: "", maxDays: 22 },
-  ];
-  return (
-    <div className="staff-settings-panel">
-      <h4>職員別設定</h4>
-      <table>
-        <thead>
-          <tr>
-            <th>氏名</th>
-            <th>NG日</th>
-            <th>最大出勤日数</th>
-          </tr>
-        </thead>
-        <tbody>
-          {staffList.map((staff, idx) => (
-            <tr key={idx}>
-              <td>{staff.name}</td>
-              <td><input type="text" placeholder="例: 5,12,19" defaultValue={staff.ngDays} /></td>
-              <td><input type="number" min="0" defaultValue={staff.maxDays} style={{ width: 60 }} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-const ShiftCalendar = () => {
+function ShiftCalendar() {
   const [value, setValue] = useState(new Date());
-  const [shifts, setShifts] = useState({});
-  const [selectedDate, setSelectedDate] = useState(null);
+  const { shifts, shiftCounts } = useShift();
 
-  // 日付をYYYY-MM-DD形式で管理
-  const formatDate = (date) => date.toISOString().split("T")[0];
-
-  // 各セルの勤務枠をクリックで編集
-  const handleShiftClick = (date, idx) => {
-    setSelectedDate(date);
+  const handleSave = () => {
+    const data = {
+      shifts,
+      shiftCounts,
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem('currentShift', JSON.stringify(data));
+    alert('シフトを保存しました');
   };
 
-  // カレンダーの各セルに勤務枠を表示
+  const handleSaveAsTemplate = () => {
+    const templateName = prompt('テンプレート名を入力してください');
+    if (!templateName) return;
+
+    const data = {
+      id: Date.now(),
+      name: templateName,
+      shifts,
+      shiftCounts,
+      createdAt: new Date().toISOString()
+    };
+
+    const savedTemplates = JSON.parse(localStorage.getItem('shiftTemplates') || '[]');
+    savedTemplates.push(data);
+    localStorage.setItem('shiftTemplates', JSON.stringify(savedTemplates));
+    alert('テンプレートとして保存しました');
+  };
+
   const tileContent = ({ date, view }) => {
     if (view !== "month") return null;
-    // 当月以外は何も描画しない
     const currentMonth = value.getMonth();
     if (date.getMonth() !== currentMonth) return null;
-    const dayShifts = shifts[formatDate(date)] || {};
-    return (
-      <div className="shift-badges">
-        {shiftLabels.map((label, idx) => (
-          <div
-            key={idx}
-            className={`shift-badge${dayShifts[idx] ? " filled" : ""}`}
-            onClick={e => {
-              e.stopPropagation();
-              handleShiftClick(date, idx);
-            }}
-            title={label}
-          >
-            <span className="shift-label">{label}</span>
-            <span className="shift-name">{dayShifts[idx] || ""}</span>
-          </div>
-        ))}
-      </div>
-    );
+    
+    return <ShiftDisplay 
+      date={date} 
+      isSelected={value && 
+        value.getDate() === date.getDate() && 
+        value.getMonth() === date.getMonth() && 
+        value.getFullYear() === date.getFullYear()}
+    />;
   };
 
   return (
-    <div className="calendar-flex">
-      <div className="calendar-root">
-        <div className="calendar-container">
-          <Calendar
-            onChange={setValue}
-            value={value}
-            locale="ja-JP"
-            tileContent={tileContent}
-          />
+    <ShiftProvider>
+      <div className="calendar-page">
+        <div className="calendar-actions-panel">
+          <div className="panel-content">
+            <button onClick={handleSave} className="save-btn">
+              保存する
+            </button>
+            <button onClick={handleSaveAsTemplate} className="save-template-btn">
+              テンプレートとして保存
+            </button>
+          </div>
         </div>
+
+        <div className="calendar-panel">
+          <div className="panel-content">
+            <Calendar
+              onChange={setValue}
+              value={value}
+              locale="ja-JP"
+              formatDay={(locale, date) => date.toLocaleDateString("ja-JP", { day: "numeric" })}
+              tileContent={tileContent}
+              className="shift-calendar"
+            />
+          </div>
+        </div>
+
+        <style>
+          {`
+            .calendar-page {
+              display: flex;
+              flex-direction: column;
+              gap: 1rem;
+              padding: 0.5rem;
+            }
+
+            .calendar-actions-panel,
+            .calendar-panel {
+              background: #fff;
+              border-radius: 16px;
+              box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+              overflow: hidden;
+            }
+
+            .panel-content {
+              padding: 1.5rem;
+            }
+
+            .calendar-actions-panel .panel-content {
+              display: flex;
+              gap: 1rem;
+              padding: 0.5rem 1.5rem;
+            }
+
+            .save-btn,
+            .save-template-btn {
+              padding: 0.75rem 1.5rem;
+              border: none;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 1rem;
+              font-weight: 500;
+              transition: all 0.2s ease;
+              position: relative;
+              overflow: hidden;
+            }
+
+            .save-btn {
+              background: #1976d2;
+              color: white;
+            }
+
+            .save-btn:hover {
+              background: #1565c0;
+              transform: translateY(-1px);
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            .save-btn:active {
+              transform: translateY(1px);
+              box-shadow: none;
+            }
+
+            .save-btn::after,
+            .save-template-btn::after {
+              content: '';
+              position: absolute;
+              top: 50%;
+              left: 50%;
+              width: 5px;
+              height: 5px;
+              background: rgba(255, 255, 255, 0.5);
+              opacity: 0;
+              border-radius: 100%;
+              transform: scale(1, 1) translate(-50%);
+              transform-origin: 50% 50%;
+            }
+
+            .save-btn:active::after,
+            .save-template-btn:active::after {
+              animation: ripple 0.6s ease-out;
+            }
+
+            @keyframes ripple {
+              0% {
+                transform: scale(0, 0);
+                opacity: 0.5;
+              }
+              100% {
+                transform: scale(20, 20);
+                opacity: 0;
+              }
+            }
+
+            .save-template-btn {
+              background: #4caf50;
+              color: white;
+            }
+
+            .save-template-btn:hover {
+              background: #43a047;
+              transform: translateY(-1px);
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            .save-template-btn:active {
+              transform: translateY(1px);
+              box-shadow: none;
+            }
+
+            .shift-calendar {
+              width: 100%;
+              border: none;
+              font-size: 1rem;
+            }
+
+            .react-calendar__tile {
+              padding: 0.5rem;
+              min-height: 100px;
+              position: relative;
+              transition: all 0.2s ease;
+            }
+
+            .react-calendar__tile--now {
+              background: none;
+            }
+
+            .react-calendar__tile--now:enabled:hover,
+            .react-calendar__tile--now:enabled:focus {
+              background: #e3f2fd;
+            }
+
+            .react-calendar__tile--active {
+              background: none !important;
+              color: #1976d2 !important;
+              font-weight: 600;
+            }
+
+            .react-calendar__tile--active::before {
+              content: '';
+              position: absolute;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              border: 2px solid #1976d2;
+              border-radius: 8px;
+              pointer-events: none;
+              animation: fadeIn 0.2s ease;
+            }
+
+            .react-calendar__tile:enabled:hover,
+            .react-calendar__tile:enabled:focus {
+              background: #e3f2fd;
+              border-radius: 8px;
+            }
+
+            @keyframes fadeIn {
+              from {
+                opacity: 0;
+                transform: scale(0.95);
+              }
+              to {
+                opacity: 1;
+                transform: scale(1);
+              }
+            }
+
+            .shift-badges {
+              display: flex;
+              flex-direction: column;
+              gap: 2px;
+              margin-top: 4px;
+            }
+
+            .shift-group {
+              display: flex;
+              flex-direction: row;
+              flex-wrap: wrap;
+              gap: 2px;
+            }
+
+            .shift-badge {
+              display: flex;
+              align-items: center;
+              transition: all 0.2s ease;
+            }
+
+            .shift-select {
+              padding: 2px 4px;
+              font-size: 0.8rem;
+              border: 1px solid #ddd;
+              border-radius: 3px;
+              background: #f5f7fa;
+              cursor: pointer;
+              transition: all 0.2s ease;
+              width: 100%;
+              -webkit-appearance: none;
+              -moz-appearance: none;
+              appearance: none;
+            }
+
+            .shift-select::-ms-expand {
+              display: none;
+            }
+
+            .shift-select:hover {
+              background: #e3f2fd;
+            }
+
+            .shift-select option {
+              background: white;
+            }
+
+            .shift-select option:first-child {
+              color: #666;
+              font-weight: 500;
+            }
+
+            .shift-settings {
+              transition: all 0.2s ease;
+              overflow: hidden;
+            }
+
+            .add-shift-btn,
+            .remove-shift-btn {
+              width: 20px;
+              height: 20px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              border: 1px solid #ddd;
+              border-radius: 2px;
+              background: white;
+              cursor: pointer;
+              font-size: 0.8rem;
+              padding: 0;
+              color: #666;
+              transition: all 0.2s ease;
+            }
+
+            .add-shift-btn:hover {
+              background: #e3f2fd;
+              border-color: #1976d2;
+              color: #1976d2;
+            }
+
+            .remove-shift-btn:hover {
+              background: #ffebee;
+              border-color: #d32f2f;
+              color: #d32f2f;
+            }
+          `}
+        </style>
       </div>
-      <div className="side-panel-outer">
-        <PrintButton />
-        <SidePanel date={selectedDate} shifts={shifts} />
-        <StaffSettingsPanel />
-      </div>
-      <style>
-        {`
-        .calendar-flex {
-          display: flex;
-          flex-direction: row;
-          align-items: stretch;
-          height: 100%;
-        }
-        .calendar-root, .side-panel-outer {
-          height: 100%;
-        }
-        .side-panel-outer {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          min-width: 320px;
-          max-width: 400px;
-          margin-left: 32px;
-        }
-        .print-btn {
-          margin-bottom: 16px;
-          align-self: flex-end;
-          display: block;
-          padding: 8px 24px;
-          font-size: 1.1em;
-          background: #1976d2;
-          color: #fff;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-        }
-        .side-panel {
-          width: 100%;
-          background: #fff;
-          border-radius: 12px;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-          padding: 24px 20px;
-          font-size: 1.05em;
-          overflow: auto;
-        }
-        .side-panel h3 {
-          margin-top: 0;
-          font-size: 1.2em;
-          color: #1976d2;
-        }
-        .side-panel ul {
-          padding-left: 1em;
-        }
-        .side-panel li {
-          margin-bottom: 8px;
-        }
-        .calendar-root {
-          font-family: 'Segoe UI', 'Hiragino Sans', 'Meiryo', sans-serif;
-          background: #f7f9fb;
-          min-height: 100vh;
-          padding: 32px 0;
-        }
-        .calendar-title {
-          text-align: center;
-          font-size: 2rem;
-          font-weight: 700;
-          color: #1976d2;
-          margin-bottom: 24px;
-          letter-spacing: 0.1em;
-        }
-        .calendar-container {
-          background: #fff;
-          border-radius: 18px;
-          box-shadow: 0 4px 24px rgba(0,0,0,0.08);
-          padding: 32px 16px 16px 16px;
-          max-width: 900px;
-          max-height: 1270px;
-          aspect-ratio: 1/1.41;
-          margin: 0 auto;
-        }
-        .react-calendar {
-          border: none;
-          background: transparent;
-          font-size: 1.1rem;
-        }
-        .react-calendar__month-view__days {
-          border: 1px solid #e0e0e0;
-          border-radius: 0;
-        }
-        .react-calendar__tile {
-          border: 1px solid #e0e0e0;
-          border-radius: 0;
-          min-height: 48px;
-          box-sizing: border-box;
-          background: #fff;
-          transition: background 0.2s;
-        }
-        .react-calendar__tile--active {
-          background: #e3f2fd !important;
-          color: #1976d2 !important;
-        }
-        .react-calendar__tile--now {
-          background: none !important;
-          border: none !important;
-        }
-        .react-calendar__month-view__days__day--weekend {
-          color: #e57373;
-        }
-        .react-calendar__tile--neighboringMonth {
-          color: #bdbdbd !important;
-          background: #fafafa !important;
-        }
-        .shift-badges {
-          display: flex;
-          flex-direction: column;
-          gap: 1px;
-          margin-top: 1px;
-          flex-wrap: nowrap;
-          justify-content: flex-start;
-        }
-        .shift-badge {
-          display: flex;
-          flex-direction: row;
-          align-items: center;
-          min-width: 36px;
-          min-height: 16px;
-          background: #f1f8fe;
-          border-radius: 3px;
-          border: 1px solid #bbdefb;
-          padding: 0 2px;
-          font-size: 0.78em;
-          color: #1976d2;
-          cursor: pointer;
-          transition: background 0.2s, box-shadow 0.2s;
-        }
-        .shift-badge.filled {
-          background: #1976d2;
-          color: #fff;
-          border: 1px solid #1976d2;
-          font-weight: 600;
-        }
-        .shift-badge:hover {
-          background: #90caf9;
-          color: #fff;
-        }
-        .shift-label {
-          margin-right: 1px;
-          font-size: 0.78em;
-        }
-        .shift-name {
-          font-size: 0.78em;
-          font-weight: 500;
-        }
-        @media print {
-          .print-btn { display: none !important; }
-        }
-        .staff-settings-panel {
-          width: 100%;
-          margin-top: 32px;
-          background: #f8fafc;
-          border-radius: 8px;
-          padding: 16px 12px;
-          font-size: 0.98em;
-        }
-        .staff-settings-panel h4 {
-          margin-top: 0;
-          color: #1976d2;
-          font-size: 1.08em;
-        }
-        .staff-settings-panel table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-        .staff-settings-panel th, .staff-settings-panel td {
-          border: 1px solid #e0e0e0;
-          padding: 6px 8px;
-          text-align: center;
-        }
-        .staff-settings-panel th {
-          background: #e3f2fd;
-        }
-        .staff-settings-panel input[type="text"], .staff-settings-panel input[type="number"] {
-          width: 90%;
-          padding: 2px 4px;
-          border: 1px solid #bdbdbd;
-          border-radius: 4px;
-        }
-        `}
-      </style>
-    </div>
+    </ShiftProvider>
   );
-};
+}
 
 export default ShiftCalendar; 
