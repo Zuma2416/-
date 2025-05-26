@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ShiftCalendar from './Calendar';
 import { ShiftTemplate } from './ShiftTemplate';
+import { EmployeeSettings } from './EmployeeSettings';
 import { Tabs, Tab, TabPanel } from './TabPanel';
 import { ShiftProvider } from './ShiftManager';
 import './App.css';
@@ -32,6 +33,12 @@ function App() {
               selected={activeTab === 1}
               onClick={() => handleTabChange(1)}
             />
+            <Tab
+              label="職員設定"
+              value={2}
+              selected={activeTab === 2}
+              onClick={() => handleTabChange(2)}
+            />
           </Tabs>
 
           <TabPanel value={activeTab} index={0}>
@@ -43,6 +50,12 @@ function App() {
           <TabPanel value={activeTab} index={1}>
             <div className="template-section" key={`template-${key}`}>
               <ShiftTemplate />
+            </div>
+          </TabPanel>
+
+          <TabPanel value={activeTab} index={2}>
+            <div className="employee-settings-section" key={`employee-settings-${key}`}>
+              <EmployeeSettings />
             </div>
           </TabPanel>
         </main>
@@ -63,7 +76,8 @@ function App() {
             }
 
             .calendar-section,
-            .template-section {
+            .template-section,
+            .employee-settings-section {
               padding: 0.5rem;
             }
 

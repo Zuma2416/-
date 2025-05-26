@@ -1,142 +1,408 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from "react";
 
 const ShiftContext = createContext();
 
 export function ShiftProvider({ children }) {
   const [shifts, setShifts] = useState({});
-  const [shiftCounts, setShiftCounts] = useState({});
-  const [pendingUpdates, setPendingUpdates] = useState({});
+  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
+  const [employees, setEmployees] = useState([]);
 
-  // シフト数の同期を確認する関数
-  const syncShiftCounts = (dateStr, label, expectedCount) => {
-    const actualCount = Object.keys(shifts[dateStr] || {})
-      .filter(key => key.startsWith(`${label}-`))
-      .length;
-
-    if (actualCount !== expectedCount) {
-      // 実際のシフト情報を新しい数に合わせて調整
-      const newShifts = { ...shifts };
-      if (!newShifts[dateStr]) {
-        newShifts[dateStr] = {};
+  // ローカルストレージからシフトデータと職員データを読み込む
+  const loadData = () => {
+    try {
+      const savedData = localStorage.getItem('currentShift');
+      if (savedData) {
+        const { shifts: savedShifts } = JSON.parse(savedData);
+        setShifts(savedShifts);
       }
 
-      // 既存のシフト情報を保持
-      const existingShifts = Object.entries(newShifts[dateStr])
-        .filter(([key]) => key.startsWith(`${label}-`))
-        .sort(([a], [b]) => {
-          const aIndex = parseInt(a.split('-')[1]);
-          const bIndex = parseInt(b.split('-')[1]);
-          return aIndex - bIndex;
-        });
-
-      // 新しいシフト情報オブジェクトを作成
-      const updatedShifts = {};
-      existingShifts.forEach(([key, value], index) => {
-        if (index < expectedCount) {
-          updatedShifts[`${label}-${index}`] = value;
-        }
-      });
-
-      // 更新されたシフト情報を設定
-      Object.keys(newShifts[dateStr])
-        .filter(key => key.startsWith(`${label}-`))
-        .forEach(key => delete newShifts[dateStr][key]);
-
-      Object.assign(newShifts[dateStr], updatedShifts);
-      setShifts(newShifts);
+      const savedEmployees = JSON.parse(localStorage.getItem('employees') || '[]');
+      console.log('ShiftManager: 職員データ読み込み', savedEmployees);
+      setEmployees(savedEmployees);
+      
+      // 職員データが空の場合は警告
+      if (savedEmployees.length === 0) {
+        console.warn('ShiftManager: 職員データが空です。職員設定タブで職員を追加してください。');
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
     }
   };
 
-  // テンプレート適用用の関数を追加
-  const applyTemplate = (template) => {
-    // シフト数を更新
-    setShiftCounts(template.shiftCounts);
-
-    // 各日付のシフト数を同期
-    Object.entries(template.shiftCounts).forEach(([label, count]) => {
-      Object.keys(shifts).forEach(dateStr => {
-        syncShiftCounts(dateStr, label, count);
-      });
-    });
-  };
-
-  const handleShiftChange = (date, shiftIndex, value) => {
-    const dateStr = date.toISOString().split("T")[0];
-    setShifts(prev => ({
-      ...prev,
-      [dateStr]: {
-        ...prev[dateStr],
-        [shiftIndex]: value
-      }
-    }));
-  };
-
-  const handleAddShift = (date, label) => {
-    const dateStr = date.toISOString().split("T")[0];
-    const currentCount = shiftCounts[dateStr]?.[label] || 1;
-    
-    // 上限チェックを追加
-    if (currentCount >= 4) {
-      alert('シフト枠は最大4つまでです');
-      return;
-    }
-
-    const newCount = currentCount + 1;
-
-    // まずシフト数を更新
-    setShiftCounts(prev => ({
-      ...prev,
-      [dateStr]: {
-        ...prev[dateStr],
-        [label]: newCount
-      }
-    }));
-
-    // 更新を待機リストに追加
-    setPendingUpdates(prev => ({
-      ...prev,
-      [`${dateStr}-${label}`]: newCount
-    }));
-  };
-
-  const handleRemoveShift = (date, label, index) => {
-    const dateStr = date.toISOString().split("T")[0];
-    const newCount = (shiftCounts[dateStr]?.[label] || 1) - 1;
-    
-    // まずシフト数を更新
-    setShiftCounts(prev => ({
-      ...prev,
-      [dateStr]: {
-        ...prev[dateStr],
-        [label]: newCount
-      }
-    }));
-
-    // 更新を待機リストに追加
-    setPendingUpdates(prev => ({
-      ...prev,
-      [`${dateStr}-${label}`]: newCount
-    }));
-  };
-
-  // シフト数の同期を監視
+  // 初期ロード
   useEffect(() => {
-    Object.entries(pendingUpdates).forEach(([key, expectedCount]) => {
-      const [dateStr, label] = key.split('-');
-      syncShiftCounts(dateStr, label, expectedCount);
+    loadData();
+  }, []);
+
+  // 定期的なデータ更新
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      loadData();
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  // シフトデータを保存
+  const saveShifts = (newShifts) => {
+    try {
+      const data = {
+        shifts: newShifts,
+        savedAt: new Date().toISOString()
+      };
+      localStorage.setItem('currentShift', JSON.stringify(data));
+      setShifts(newShifts);
+    } catch (error) {
+      console.error('Error saving shifts:', error);
+    }
+  };
+
+  // 職員データを保存
+  const saveEmployees = (newEmployees) => {
+    try {
+      setEmployees(newEmployees);
+      localStorage.setItem('employees', JSON.stringify(newEmployees));
+    } catch (error) {
+      console.error('Error saving employees:', error);
+    }
+  };
+
+  // シフトに職員を追加
+  const addEmployeeToShift = (dateKey, shiftLabel, employeeId) => {
+    try {
+      setShifts(prevShifts => {
+        const newShifts = { ...prevShifts };
+        if (!newShifts[dateKey]) {
+          newShifts[dateKey] = {};
+        }
+        if (!newShifts[dateKey][shiftLabel]) {
+          newShifts[dateKey][shiftLabel] = [];
+        }
+        if (!newShifts[dateKey][shiftLabel].includes(employeeId)) {
+          newShifts[dateKey][shiftLabel] = [...newShifts[dateKey][shiftLabel], employeeId];
+        }
+        saveShifts(newShifts);
+        return newShifts;
+      });
+    } catch (error) {
+      console.error('Error adding employee to shift:', error);
+    }
+  };
+
+  // シフトから職員を削除
+  const removeEmployeeFromShift = (dateKey, shiftLabel, employeeId) => {
+    try {
+      setShifts(prevShifts => {
+        const newShifts = { ...prevShifts };
+        if (newShifts[dateKey]?.[shiftLabel]) {
+          newShifts[dateKey][shiftLabel] = newShifts[dateKey][shiftLabel].filter(id => id !== employeeId);
+          // シフトが空になった場合はそのシフトを削除
+          if (newShifts[dateKey][shiftLabel].length === 0) {
+            delete newShifts[dateKey][shiftLabel];
+          }
+          // 日付のシフトがすべて空になった場合はその日付を削除
+          if (Object.keys(newShifts[dateKey]).length === 0) {
+            delete newShifts[dateKey];
+          }
+        }
+        saveShifts(newShifts);
+        return newShifts;
+      });
+    } catch (error) {
+      console.error('Error removing employee from shift:', error);
+    }
+  };
+
+  const clearShifts = (year, month) => {
+    try {
+      const newShifts = { ...shifts };
+      
+      // 指定された月の日付をすべて取得
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        delete newShifts[dateKey];
+      }
+
+      saveShifts(newShifts);
+    } catch (error) {
+      console.error('Error clearing shifts:', error);
+    }
+  };
+
+  // 自動シフト生成
+  const generateAutoShifts = (year, month) => {
+    try {
+      console.log('=== 自動シフト生成開始 ===');
+      console.log('対象年月:', year, month);
+      
+      // データの存在確認
+      console.log('職員データ:', employees);
+      const employeeSettings = JSON.parse(localStorage.getItem('employeeSettings') || '{}');
+      console.log('職員設定:', employeeSettings);
+      
+      if (employees.length === 0) {
+        return {
+          success: false,
+          error: '職員データが登録されていません。職員設定タブで職員を追加してください。'
+        };
+      }
+      
+      // 生活支援員の確認
+      const lifeSupportEmployees = employees.filter(emp => emp.employmentType === 'life_support');
+      console.log('生活支援員:', lifeSupportEmployees);
+      
+      if (lifeSupportEmployees.length === 0) {
+        return {
+          success: false,
+          error: '生活支援員が登録されていません。職員設定で雇用形態を「生活支援員」に設定してください。'
+        };
+      }
+
+      clearShifts(year, month);
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const shiftLabels = [
+        { id: 'morning', label: '①朝番' },
+        { id: 'day', label: '②日勤' },
+        { id: 'afternoon', label: '③昼番' },
+        { id: 'night', label: '④夜勤' },
+        { id: 'evening', label: '⑤夜番' },
+        { id: 'night_support', label: '⑥夜支' }
+      ];
+
+      let newShifts = {};
+      let assignmentLog = [];
+
+      // 各日のシフト割り当て
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        const dayOfWeek = date.getDay();
+        
+        newShifts[dateKey] = {};
+        assignmentLog.push(`${day}日の割り当て開始`);
+        
+        // 1. 日勤（②日勤）の割り当て: life_supportのみ、基本2名
+        const dayCandidates = employees.filter(emp => {
+          const isLifeSupport = emp.employmentType === 'life_support';
+          const priority = employeeSettings[emp.id]?.shiftPriorities?.day ?? 6;
+          const canWork = priority !== 6;
+          console.log(`${emp.name}: 生活支援員=${isLifeSupport}, 日勤優先度=${priority}, 勤務可能=${canWork}`);
+          return isLifeSupport && canWork;
+        });
+        
+        console.log(`${day}日 日勤候補:`, dayCandidates.map(emp => emp.name));
+        
+        // 優先度順でソート
+        dayCandidates.sort((a, b) => {
+          const priorityA = employeeSettings[a.id]?.shiftPriorities?.day ?? 6;
+          const priorityB = employeeSettings[b.id]?.shiftPriorities?.day ?? 6;
+          return priorityA - priorityB;
+        });
+        
+        // 日勤に2名まで割り当て
+        const dayShiftAssigned = [];
+        for (let i = 0; i < Math.min(2, dayCandidates.length); i++) {
+          const emp = dayCandidates[i];
+          if (!newShifts[dateKey]['②日勤']) {
+            newShifts[dateKey]['②日勤'] = [];
+          }
+          newShifts[dateKey]['②日勤'].push(emp.id);
+          dayShiftAssigned.push(emp.id);
+          assignmentLog.push(`  ②日勤: ${emp.name} (優先度${employeeSettings[emp.id]?.shiftPriorities?.day ?? 6})`);
+        }
+
+        // 2. その他のシフトの割り当て
+        const otherShifts = shiftLabels.filter(shift => shift.label !== '②日勤');
+        
+        for (let shift of otherShifts) {
+          // 勤務可能な職員を取得（優先度6以外）
+          let candidates = employees.filter(emp => {
+            const priority = employeeSettings[emp.id]?.shiftPriorities?.[shift.id] ?? 6;
+            return priority !== 6;
+          });
+          
+          // 優先度順でソート
+          candidates.sort((a, b) => {
+            const priorityA = employeeSettings[a.id]?.shiftPriorities?.[shift.id] ?? 6;
+            const priorityB = employeeSettings[b.id]?.shiftPriorities?.[shift.id] ?? 6;
+            return priorityA - priorityB;
+          });
+
+          // シフトごとの割り当てロジック
+          let assigned = false;
+          
+          for (let emp of candidates) {
+            const priority = employeeSettings[emp.id]?.shiftPriorities?.[shift.id] ?? 6;
+            
+            // 夜勤の特別ルール：その日他のシフトに入っていない人のみ
+            if (shift.label === '④夜勤') {
+              const isAlreadyAssigned = Object.values(newShifts[dateKey]).some(shiftEmployees => 
+                shiftEmployees && shiftEmployees.includes(emp.id)
+              );
+              
+              if (!isAlreadyAssigned) {
+                if (!newShifts[dateKey][shift.label]) {
+                  newShifts[dateKey][shift.label] = [];
+                }
+                newShifts[dateKey][shift.label].push(emp.id);
+                assigned = true;
+                assignmentLog.push(`  ${shift.label}: ${emp.name} (優先度${priority})`);
+                break; // 夜勤は1名のみ
+              }
+              continue;
+            }
+
+            // 既に同じシフトに割り当て済みかチェック
+            if (newShifts[dateKey][shift.label] && newShifts[dateKey][shift.label].includes(emp.id)) {
+              continue;
+            }
+
+            // 1日の勤務シフト数制限チェック
+            const currentShiftCount = Object.values(newShifts[dateKey]).reduce((count, shiftEmployees) => {
+              return count + (shiftEmployees && shiftEmployees.includes(emp.id) ? 1 : 0);
+            }, 0);
+
+            // 優先度1（最優先）の場合：1日2シフトまで可能
+            if (priority === 1 && currentShiftCount < 2) {
+              if (!newShifts[dateKey][shift.label]) {
+                newShifts[dateKey][shift.label] = [];
+              }
+              newShifts[dateKey][shift.label].push(emp.id);
+              assigned = true;
+              assignmentLog.push(`  ${shift.label}: ${emp.name} (優先度${priority})`);
+              break;
+            }
+            
+            // 優先度2（優先）の場合：他に最優先職員がいなければ、1日2シフトまで可能
+            if (priority === 2 && currentShiftCount < 2) {
+              const hasHigherPriority = candidates.some(otherEmp => {
+                const otherPriority = employeeSettings[otherEmp.id]?.shiftPriorities?.[shift.id] ?? 6;
+                const otherCurrentShiftCount = Object.values(newShifts[dateKey]).reduce((count, shiftEmployees) => {
+                  return count + (shiftEmployees && shiftEmployees.includes(otherEmp.id) ? 1 : 0);
+                }, 0);
+                return otherPriority === 1 && otherCurrentShiftCount < 2 && otherEmp.id !== emp.id;
+              });
+              
+              if (!hasHigherPriority) {
+                if (!newShifts[dateKey][shift.label]) {
+                  newShifts[dateKey][shift.label] = [];
+                }
+                newShifts[dateKey][shift.label].push(emp.id);
+                assigned = true;
+                assignmentLog.push(`  ${shift.label}: ${emp.name} (優先度${priority})`);
+                break;
+              }
+            }
+            
+            // 優先度3以下の場合：1日1シフトまで
+            if (priority >= 3 && currentShiftCount === 0) {
+              // より高い優先度の職員が利用可能かチェック
+              const hasHigherPriority = candidates.some(otherEmp => {
+                const otherPriority = employeeSettings[otherEmp.id]?.shiftPriorities?.[shift.id] ?? 6;
+                const otherCurrentShiftCount = Object.values(newShifts[dateKey]).reduce((count, shiftEmployees) => {
+                  return count + (shiftEmployees && shiftEmployees.includes(otherEmp.id) ? 1 : 0);
+                }, 0);
+                return otherPriority < priority && 
+                       ((otherPriority === 1 && otherCurrentShiftCount < 2) ||
+                        (otherPriority === 2 && otherCurrentShiftCount < 2) ||
+                        (otherPriority >= 3 && otherCurrentShiftCount === 0)) &&
+                       otherEmp.id !== emp.id;
+              });
+              
+              if (!hasHigherPriority) {
+                if (!newShifts[dateKey][shift.label]) {
+                  newShifts[dateKey][shift.label] = [];
+                }
+                newShifts[dateKey][shift.label].push(emp.id);
+                assigned = true;
+                assignmentLog.push(`  ${shift.label}: ${emp.name} (優先度${priority})`);
+                break;
+              }
+            }
+          }
+          
+          if (!assigned && candidates.length > 0) {
+            assignmentLog.push(`  ${shift.label}: 割り当て不可 (候補${candidates.length}名)`);
+          }
+        }
+      }
+
+      // 3. 被り修正と最適化
+      newShifts = optimizeShiftAssignments(newShifts, employees, employeeSettings, year, month);
+
+      console.log('割り当てログ:', assignmentLog);
+      console.log('生成されたシフト:', newShifts);
+
+      saveShifts(newShifts);
+      return {
+        success: true,
+        message: `自動シフトを生成しました\n\n割り当て詳細:\n${assignmentLog.slice(0, 10).join('\n')}${assignmentLog.length > 10 ? '\n...' : ''}`
+      };
+    } catch (error) {
+      console.error('Error generating auto shifts:', error);
+      return {
+        success: false,
+        error: `シフトの生成中にエラーが発生しました: ${error.message}`
+      };
+    }
+  };
+
+  // シフト割り当ての最適化関数
+  const optimizeShiftAssignments = (shifts, employees, employeeSettings, year, month) => {
+    const optimizedShifts = JSON.parse(JSON.stringify(shifts)); // Deep copy
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    // 各職員の月間勤務日数をカウント
+    const monthlyWorkCount = {};
+    employees.forEach(emp => {
+      monthlyWorkCount[emp.id] = 0;
     });
-    setPendingUpdates({});
-  }, [pendingUpdates, shifts]);
+
+    // 現在の割り当てから勤務日数をカウント
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      
+      if (optimizedShifts[dateKey]) {
+        Object.values(optimizedShifts[dateKey]).forEach(shiftEmployees => {
+          if (shiftEmployees) {
+            shiftEmployees.forEach(empId => {
+              monthlyWorkCount[empId] = (monthlyWorkCount[empId] || 0) + 1;
+            });
+          }
+        });
+      }
+    }
+
+    // 勤務日数の偏りを調整
+    const maxWorkDays = Math.max(...Object.values(monthlyWorkCount));
+    const minWorkDays = Math.min(...Object.values(monthlyWorkCount));
+    
+    // 偏りが大きい場合は調整を試行
+    if (maxWorkDays - minWorkDays > 3) {
+      // 勤務日数が多い職員から少ない職員へのシフト移動を試行
+      // （実装は複雑になるため、基本的な枠組みのみ）
+      console.log('勤務日数の偏りを検出しました。調整を検討してください。', {
+        最大勤務日数: maxWorkDays,
+        最小勤務日数: minWorkDays
+      });
+    }
+
+    return optimizedShifts;
+  };
 
   return (
     <ShiftContext.Provider value={{
       shifts,
-      shiftCounts,
-      setShiftCounts,
-      handleShiftChange,
-      handleAddShift,
-      handleRemoveShift,
-      applyTemplate
+      employees,
+      saveEmployees,
+      setCurrentMonth,
+      addEmployeeToShift,
+      removeEmployeeFromShift,
+      clearShifts,
+      generateAutoShifts
     }}>
       {children}
     </ShiftContext.Provider>
