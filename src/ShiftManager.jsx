@@ -131,28 +131,117 @@ export function ShiftProvider({ children }) {
     }
   };
 
-  // 自動シフト生成
+  // ヘルパー関数: 職員が特定の日に勤務可能かチェック
+  const canEmployeeWorkOnDate = (employee, date, dateKey, employeeSettings) => {
+    const settings = employeeSettings[employee.id];
+    if (!settings) return true;
+
+    // 特定日の休み希望をチェック
+    if (settings.unavailableDates && settings.unavailableDates.includes(dateKey)) {
+      return false;
+    }
+
+    // 曜日の希望休をチェック
+    const dayOfWeek = date.getDay();
+    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+    const dayName = dayNames[dayOfWeek];
+    if (settings.preferredDaysOff && settings.preferredDaysOff[dayName]) {
+      return false;
+    }
+
+    return true;
+  };
+
+  // ヘルパー関数: 連続勤務日数をチェック
+  const getConsecutiveWorkDays = (employeeId, dateKey, shifts) => {
+    const date = new Date(dateKey);
+    let consecutive = 0;
+
+    // 前日から遡って連続勤務日数をカウント
+    for (let i = 1; i <= 10; i++) {
+      const checkDate = new Date(date);
+      checkDate.setDate(checkDate.getDate() - i);
+      const checkDateKey = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+
+      if (!shifts[checkDateKey]) break;
+
+      const isWorking = Object.values(shifts[checkDateKey]).some(shiftEmployees =>
+        shiftEmployees && shiftEmployees.includes(employeeId)
+      );
+
+      if (isWorking) {
+        consecutive++;
+      } else {
+        break;
+      }
+    }
+
+    return consecutive;
+  };
+
+  // ヘルパー関数: シフトの時間を取得
+  const getShiftHours = (shiftId) => {
+    const shiftHours = {
+      'morning': 5,      // 6:00-11:00
+      'day': 10,         // 9:00-19:00
+      'afternoon': 5,    // 11:00-16:00
+      'night': 17,       // 16:00-翌9:00
+      'evening': 3,      // 19:00-22:00
+      'night_support': 8 // 22:00-翌6:00
+    };
+    return shiftHours[shiftId] || 0;
+  };
+
+  // ヘルパー関数: 職員の週間勤務時間を計算
+  const getWeeklyWorkHours = (employeeId, dateKey, shifts) => {
+    const date = new Date(dateKey);
+    let totalHours = 0;
+
+    // 過去6日間の勤務時間を計算（今日を含めて7日間）
+    for (let i = 0; i < 7; i++) {
+      const checkDate = new Date(date);
+      checkDate.setDate(checkDate.getDate() - i);
+      const checkDateKey = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+
+      if (shifts[checkDateKey]) {
+        Object.entries(shifts[checkDateKey]).forEach(([shiftLabel, shiftEmployees]) => {
+          if (shiftEmployees && shiftEmployees.includes(employeeId)) {
+            const shiftId = shiftLabel.includes('朝番') ? 'morning' :
+                          shiftLabel.includes('日勤') ? 'day' :
+                          shiftLabel.includes('昼番') ? 'afternoon' :
+                          shiftLabel.includes('夜勤') ? 'night' :
+                          shiftLabel.includes('夜番') ? 'evening' : 'night_support';
+            totalHours += getShiftHours(shiftId);
+          }
+        });
+      }
+    }
+
+    return totalHours;
+  };
+
+  // 自動シフト生成（改善版）
   const generateAutoShifts = (year, month) => {
     try {
-      console.log('=== 自動シフト生成開始 ===');
+      console.log('=== 自動シフト生成開始（改善版） ===');
       console.log('対象年月:', year, month);
-      
+
       // データの存在確認
       console.log('職員データ:', employees);
       const employeeSettings = JSON.parse(localStorage.getItem('employeeSettings') || '{}');
       console.log('職員設定:', employeeSettings);
-      
+
       if (employees.length === 0) {
         return {
           success: false,
           error: '職員データが登録されていません。職員設定タブで職員を追加してください。'
         };
       }
-      
+
       // 生活支援員の確認
       const lifeSupportEmployees = employees.filter(emp => emp.employmentType === 'life_support');
       console.log('生活支援員:', lifeSupportEmployees);
-      
+
       if (lifeSupportEmployees.length === 0) {
         return {
           success: false,
@@ -173,34 +262,48 @@ export function ShiftProvider({ children }) {
 
       let newShifts = {};
       let assignmentLog = [];
+      let constraintViolations = [];
 
       // 各日のシフト割り当て
       for (let day = 1; day <= daysInMonth; day++) {
         const date = new Date(year, month, day);
         const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         const dayOfWeek = date.getDay();
-        
+
         newShifts[dateKey] = {};
         assignmentLog.push(`${day}日の割り当て開始`);
-        
+
         // 1. 日勤（②日勤）の割り当て: life_supportのみ、基本2名
         const dayCandidates = employees.filter(emp => {
           const isLifeSupport = emp.employmentType === 'life_support';
           const priority = employeeSettings[emp.id]?.shiftPriorities?.day ?? 6;
           const canWork = priority !== 6;
-          console.log(`${emp.name}: 生活支援員=${isLifeSupport}, 日勤優先度=${priority}, 勤務可能=${canWork}`);
-          return isLifeSupport && canWork;
+          const canWorkOnDate = canEmployeeWorkOnDate(emp, date, dateKey, employeeSettings);
+
+          // 連続勤務日数チェック
+          const consecutiveDays = getConsecutiveWorkDays(emp.id, dateKey, newShifts);
+          const maxConsecutive = employeeSettings[emp.id]?.maxConsecutiveDays ?? 5;
+          const withinConsecutiveLimit = consecutiveDays < maxConsecutive;
+
+          // 週間勤務時間チェック
+          const weeklyHours = getWeeklyWorkHours(emp.id, dateKey, newShifts);
+          const maxWeeklyHours = employeeSettings[emp.id]?.maxHoursPerWeek ?? 40;
+          const withinWeeklyLimit = (weeklyHours + 10) <= maxWeeklyHours; // 日勤は10時間
+
+          console.log(`${emp.name}: 生活支援員=${isLifeSupport}, 日勤優先度=${priority}, 勤務可能=${canWork}, 日付OK=${canWorkOnDate}, 連続=${consecutiveDays}/${maxConsecutive}, 週間時間=${weeklyHours}/${maxWeeklyHours}`);
+
+          return isLifeSupport && canWork && canWorkOnDate && withinConsecutiveLimit && withinWeeklyLimit;
         });
-        
+
         console.log(`${day}日 日勤候補:`, dayCandidates.map(emp => emp.name));
-        
+
         // 優先度順でソート
         dayCandidates.sort((a, b) => {
           const priorityA = employeeSettings[a.id]?.shiftPriorities?.day ?? 6;
           const priorityB = employeeSettings[b.id]?.shiftPriorities?.day ?? 6;
           return priorityA - priorityB;
         });
-        
+
         // 日勤に2名まで割り当て
         const dayShiftAssigned = [];
         for (let i = 0; i < Math.min(2, dayCandidates.length); i++) {
@@ -213,16 +316,33 @@ export function ShiftProvider({ children }) {
           assignmentLog.push(`  ②日勤: ${emp.name} (優先度${employeeSettings[emp.id]?.shiftPriorities?.day ?? 6})`);
         }
 
+        if (dayCandidates.length < 2) {
+          constraintViolations.push(`${day}日: 日勤の人数が不足しています（${dayCandidates.length}/2名）`);
+        }
+
         // 2. その他のシフトの割り当て
         const otherShifts = shiftLabels.filter(shift => shift.label !== '②日勤');
-        
+
         for (let shift of otherShifts) {
           // 勤務可能な職員を取得（優先度6以外）
           let candidates = employees.filter(emp => {
             const priority = employeeSettings[emp.id]?.shiftPriorities?.[shift.id] ?? 6;
-            return priority !== 6;
+            const canWorkOnDate = canEmployeeWorkOnDate(emp, date, dateKey, employeeSettings);
+
+            // 連続勤務日数チェック
+            const consecutiveDays = getConsecutiveWorkDays(emp.id, dateKey, newShifts);
+            const maxConsecutive = employeeSettings[emp.id]?.maxConsecutiveDays ?? 5;
+            const withinConsecutiveLimit = consecutiveDays < maxConsecutive;
+
+            // 週間勤務時間チェック
+            const weeklyHours = getWeeklyWorkHours(emp.id, dateKey, newShifts);
+            const maxWeeklyHours = employeeSettings[emp.id]?.maxHoursPerWeek ?? 40;
+            const shiftHours = getShiftHours(shift.id);
+            const withinWeeklyLimit = (weeklyHours + shiftHours) <= maxWeeklyHours;
+
+            return priority !== 6 && canWorkOnDate && withinConsecutiveLimit && withinWeeklyLimit;
           });
-          
+
           // 優先度順でソート
           candidates.sort((a, b) => {
             const priorityA = employeeSettings[a.id]?.shiftPriorities?.[shift.id] ?? 6;
@@ -232,16 +352,16 @@ export function ShiftProvider({ children }) {
 
           // シフトごとの割り当てロジック
           let assigned = false;
-          
+
           for (let emp of candidates) {
             const priority = employeeSettings[emp.id]?.shiftPriorities?.[shift.id] ?? 6;
-            
+
             // 夜勤の特別ルール：その日他のシフトに入っていない人のみ
             if (shift.label === '④夜勤') {
-              const isAlreadyAssigned = Object.values(newShifts[dateKey]).some(shiftEmployees => 
+              const isAlreadyAssigned = Object.values(newShifts[dateKey]).some(shiftEmployees =>
                 shiftEmployees && shiftEmployees.includes(emp.id)
               );
-              
+
               if (!isAlreadyAssigned) {
                 if (!newShifts[dateKey][shift.label]) {
                   newShifts[dateKey][shift.label] = [];
@@ -274,7 +394,7 @@ export function ShiftProvider({ children }) {
               assignmentLog.push(`  ${shift.label}: ${emp.name} (優先度${priority})`);
               break;
             }
-            
+
             // 優先度2（優先）の場合：他に最優先職員がいなければ、1日2シフトまで可能
             if (priority === 2 && currentShiftCount < 2) {
               const hasHigherPriority = candidates.some(otherEmp => {
@@ -284,7 +404,7 @@ export function ShiftProvider({ children }) {
                 }, 0);
                 return otherPriority === 1 && otherCurrentShiftCount < 2 && otherEmp.id !== emp.id;
               });
-              
+
               if (!hasHigherPriority) {
                 if (!newShifts[dateKey][shift.label]) {
                   newShifts[dateKey][shift.label] = [];
@@ -295,7 +415,7 @@ export function ShiftProvider({ children }) {
                 break;
               }
             }
-            
+
             // 優先度3以下の場合：1日1シフトまで
             if (priority >= 3 && currentShiftCount === 0) {
               // より高い優先度の職員が利用可能かチェック
@@ -304,13 +424,13 @@ export function ShiftProvider({ children }) {
                 const otherCurrentShiftCount = Object.values(newShifts[dateKey]).reduce((count, shiftEmployees) => {
                   return count + (shiftEmployees && shiftEmployees.includes(otherEmp.id) ? 1 : 0);
                 }, 0);
-                return otherPriority < priority && 
+                return otherPriority < priority &&
                        ((otherPriority === 1 && otherCurrentShiftCount < 2) ||
                         (otherPriority === 2 && otherCurrentShiftCount < 2) ||
                         (otherPriority >= 3 && otherCurrentShiftCount === 0)) &&
                        otherEmp.id !== emp.id;
               });
-              
+
               if (!hasHigherPriority) {
                 if (!newShifts[dateKey][shift.label]) {
                   newShifts[dateKey][shift.label] = [];
@@ -322,8 +442,10 @@ export function ShiftProvider({ children }) {
               }
             }
           }
-          
-          if (!assigned && candidates.length > 0) {
+
+          if (!assigned && candidates.length === 0) {
+            constraintViolations.push(`${day}日 ${shift.label}: 制約条件を満たす職員がいません`);
+          } else if (!assigned && candidates.length > 0) {
             assignmentLog.push(`  ${shift.label}: 割り当て不可 (候補${candidates.length}名)`);
           }
         }
@@ -333,12 +455,20 @@ export function ShiftProvider({ children }) {
       newShifts = optimizeShiftAssignments(newShifts, employees, employeeSettings, year, month);
 
       console.log('割り当てログ:', assignmentLog);
+      console.log('制約違反:', constraintViolations);
       console.log('生成されたシフト:', newShifts);
 
       saveShifts(newShifts);
+
+      let resultMessage = `自動シフトを生成しました`;
+      if (constraintViolations.length > 0) {
+        resultMessage += `\n\n⚠️ 制約違反:\n${constraintViolations.slice(0, 5).join('\n')}${constraintViolations.length > 5 ? `\n...他${constraintViolations.length - 5}件` : ''}`;
+      }
+
       return {
         success: true,
-        message: `自動シフトを生成しました\n\n割り当て詳細:\n${assignmentLog.slice(0, 10).join('\n')}${assignmentLog.length > 10 ? '\n...' : ''}`
+        message: resultMessage,
+        violations: constraintViolations
       };
     } catch (error) {
       console.error('Error generating auto shifts:', error);

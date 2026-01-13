@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ShiftCalendar from './Calendar';
 import { ShiftTemplate } from './ShiftTemplate';
 import { EmployeeSettings } from './EmployeeSettings';
+import AIChat from './AIChat';
 import { Tabs, Tab, TabPanel } from './TabPanel';
 import { ShiftProvider } from './ShiftManager';
 import './App.css';
@@ -39,6 +40,12 @@ function App() {
               selected={activeTab === 2}
               onClick={() => handleTabChange(2)}
             />
+            <Tab
+              label="AI アシスタント"
+              value={3}
+              selected={activeTab === 3}
+              onClick={() => handleTabChange(3)}
+            />
           </Tabs>
 
           <TabPanel value={activeTab} index={0}>
@@ -56,6 +63,12 @@ function App() {
           <TabPanel value={activeTab} index={2}>
             <div className="employee-settings-section" key={`employee-settings-${key}`}>
               <EmployeeSettings />
+            </div>
+          </TabPanel>
+
+          <TabPanel value={activeTab} index={3}>
+            <div className="ai-chat-section" key={`ai-chat-${key}`}>
+              <AIChat />
             </div>
           </TabPanel>
         </main>
@@ -79,6 +92,11 @@ function App() {
             .template-section,
             .employee-settings-section {
               padding: 0.5rem;
+            }
+
+            .ai-chat-section {
+              padding: 0;
+              height: calc(100vh - 120px);
             }
 
             .tabs-container {
