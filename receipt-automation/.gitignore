@@ -1,0 +1,35 @@
+# 環境変数
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Streamlit
+.streamlit/
+
+# アップロードファイル
+uploads/
+*.jpg
+*.jpeg
+*.png
+*.heic
+
+# 作業用Excelファイル
+立替経費精算書_*.xlsx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

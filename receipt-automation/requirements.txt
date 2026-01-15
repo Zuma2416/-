@@ -1,0 +1,21 @@
+# レシート画像から立替経費精算書への自動入力ツール
+# Python 3.9以上
+
+# Excel操作
+openpyxl==3.1.2
+
+# 画像処理・OCR
+openai==1.12.0
+pillow==10.2.0
+
+# Web UI
+streamlit==1.31.0
+
+# 環境変数管理
+python-dotenv==1.0.1
+
+# 日付処理
+python-dateutil==2.8.2
+
+# ファイル操作
+pathlib2==2.3.7.post1
